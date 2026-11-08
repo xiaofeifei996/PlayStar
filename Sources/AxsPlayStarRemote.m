@@ -92,9 +92,21 @@ static void axs_playstar_nowPlayingChanged(CFNotificationCenterRef center, void 
 }
 
 - (AxsPlayStarTrack *)axs_playstar_trackFromInfo:(NSDictionary *)info {
-    if (![info isKindOfClass:[NSDictionary class]] || info.count == 0) return nil;
+    // 诊断：先把系统到底给了什么写进日志。空字典是最常见的失败形态。
+    if (![info isKindOfClass:[NSDictionary class]]) {
+        axs_playstar_log(@"info: not a dictionary (%@)", NSStringFromClass([info class]));
+        return nil;
+    }
+    axs_playstar_log(@"info: count=%lu keys=%@", (unsigned long)info.count,
+                     [[info allKeys] componentsJoinedByString:@","]);
+    if (info.count == 0) return nil;
+
     NSString *title = info[kAxsPlayStarInfoTitle];
-    if (![title isKindOfClass:[NSString class]] || title.length == 0) return nil;
+    if (![title isKindOfClass:[NSString class]] || title.length == 0) {
+        axs_playstar_log(@"info: no title (title=%@ artist=%@)", info[kAxsPlayStarInfoTitle],
+                         info[kAxsPlayStarInfoArtist]);
+        return nil;
+    }
 
     AxsPlayStarTrack *track = [AxsPlayStarTrack new];
     track.title = title;
