@@ -282,6 +282,62 @@ static BOOL axs_send_bool_any(id object, NSArray<NSString *> *names, BOOL *found
     return AxsPlayStarVoteOutcomeDispatched;
 }
 
+#pragma mark - 从 response 读曲目
+
+/// MPCPlayerResponseItem 暴露的是 modelObject / 各 *Item 属性，
+/// 这里把能拿到的都摸一遍，凑出标题与艺术家。
++ (NSDictionary *)axs_playstar_nowPlayingFromSource:(id)source {
+    id item = [self axs_playstar_playingItemForSource:source];
+    if (!item) return nil;
+
+    // 标题兜底链：几个属性名在不同系统版本里都出现过。
+    NSString *(^stringOf)(id) = ^NSString *(id value) {
+        if ([value isKindOfClass:[NSString class]]) return value;
+        return nil;
+    };
+
+    NSString *title = nil;
+    for (NSString *name in @[@"title", @"localizedTitle"]) {
+        title = stringOf(axs_send_id(item, name));
+        if (title.length) break;
+    }
+
+    NSString *artist = nil;
+    for (NSString *name in @[@"artist", @"localizedArtistName"]) {
+        artist = stringOf(axs_send_id(item, name));
+        if (artist.length) break;
+    }
+
+    NSString *album = nil;
+    for (NSString *name in @[@"album", @"localizedAlbumTitle"]) {
+        album = stringOf(axs_send_id(item, name));
+        if (album.length) break;
+    }
+
+    // contentItemIdentifier 决定「收藏哪一首」，必须拿到。
+    NSString *contentItemID = stringOf(axs_send_id(item, @"contentItemIdentifier"));
+    if (!contentItemID.length) contentItemID = stringOf(axs_send_id(item, @"contentItemID"));
+
+    BOOL hasLiked = NO;
+    BOOL liked = axs_send_bool(item, @"isFavorited", &hasLiked);
+
+    BOOL hasEligible = NO;
+    BOOL eligible = axs_send_bool(item, @"isFavoriteEligible", &hasEligible);
+
+    NSMutableDictionary *info = [NSMutableDictionary dictionary];
+    if (title.length) info[@"title"] = title;
+    if (artist.length) info[@"artist"] = artist;
+    if (album.length) info[@"album"] = album;
+    if (contentItemID.length) info[@"contentItemID"] = contentItemID;
+    if (hasLiked) info[@"liked"] = @(liked);
+    if (hasEligible) info[@"eligible"] = @(eligible);
+
+    axs_playstar_log(@"mpc nowPlaying item=%@ title=%@ artist=%@ ci=%@ liked=%d/%d eligible=%d/%d",
+                     NSStringFromClass([item class]), title, artist, contentItemID,
+                     hasLiked, liked, hasEligible, eligible);
+    return info.count > 0 ? info : nil;
+}
+
 #pragma mark - 诊断
 
 /// 逐层打印对象图，定位到底断在哪一环。
