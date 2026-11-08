@@ -195,6 +195,8 @@ static BOOL axs_send_bool_any(id object, NSArray<NSString *> *names, BOOL *found
 
     id item = [self axs_playstar_playingItemForSource:source];
     if (!item) {
+        // 断点在这一层最常见：找不到控制器 / response / playingItem。
+        [self axs_playstar_dumpObjectGraphFrom:source];
         finish(NO, @"找不到当前播放项");
         return AxsPlayStarVoteOutcomeUnavailable;
     }
@@ -278,6 +280,93 @@ static BOOL axs_send_bool_any(id object, NSArray<NSString *> *names, BOOL *found
     });
 
     return AxsPlayStarVoteOutcomeDispatched;
+}
+
+#pragma mark - 诊断
+
+/// 逐层打印对象图，定位到底断在哪一环。
++ (void)axs_playstar_dumpObjectGraphFrom:(id)source {
+    axs_playstar_log(@"=== dump start source=%@", NSStringFromClass([source class]));
+
+    id viewController = [self axs_playstar_viewControllerForSource:source];
+    axs_playstar_log(@"dump: viewController=%@", viewController ? NSStringFromClass([viewController class]) : @"nil");
+    if (!viewController) {
+        // 响应链走不通时，把整条 nextResponder 链打出来看看到底挂在谁身上。
+        id responder = source;
+        NSMutableArray *chain = [NSMutableArray array];
+        NSUInteger guard = 0;
+        while (responder && guard++ < 40) {
+            [chain addObject:NSStringFromClass([responder class])];
+            if (![responder respondsToSelector:@selector(nextResponder)]) break;
+            typedef id (*NextFn)(id, SEL);
+            id next = ((NextFn)objc_msgSend)(responder, @selector(nextResponder));
+            if (next == responder) break;
+            responder = next;
+        }
+        axs_playstar_log(@"dump: responder chain=%@", [chain componentsJoinedByString:@" -> "]);
+    }
+
+    id controller = [self axs_playstar_controllerForSource:source];
+    axs_playstar_log(@"dump: controller=%@", controller ? NSStringFromClass([controller class]) : @"nil");
+
+    id response = [self axs_playstar_responseForSource:source];
+    axs_playstar_log(@"dump: response=%@", response ? NSStringFromClass([response class]) : @"nil");
+
+    if (controller) {
+        NSArray *names = @[@"response", @"tracklist", @"metadataDataSource", @"endpointController",
+                           @"nowPlayingController", @"playerPath"];
+        for (NSString *name in names) {
+            id value = axs_send_id(controller, name);
+            axs_playstar_log(@"dump: controller.%@ = %@", name,
+                             value ? NSStringFromClass([value class]) : @"nil");
+        }
+        // 把控制器上所有能返回对象的无参 getter 扫一遍，找真正的数据源。
+        NSUInteger guard = 0;
+        Class cls = [controller class];
+        while (cls && guard++ < 6) {
+            unsigned int count = 0;
+            Method *methods = class_copyMethodList(cls, &count);
+            NSMutableArray *hits = [NSMutableArray array];
+            for (unsigned int i = 0; i < count; i++) {
+                SEL selector = method_getName(methods[i]);
+                const char *types = method_getTypeEncoding(methods[i]);
+                if (method_getNumberOfArguments(methods[i]) != 2) continue;
+                if (!types || types[0] != '@') continue;
+                NSString *name = NSStringFromSelector(selector);
+                if ([name hasPrefix:@"_"] || [name containsString:@"delegate"]) continue;
+                if (![controller respondsToSelector:selector]) continue;
+                id value = axs_send_id(controller, name);
+                if (value) [hits addObject:[NSString stringWithFormat:@"%@:%@", name, NSStringFromClass([value class])]];
+            }
+            free(methods);
+            if (hits.count > 0) {
+                axs_playstar_log(@"dump: %@ getters=%@", NSStringFromClass(cls),
+                                 [hits componentsJoinedByString:@" | "]);
+            }
+            cls = class_getSuperclass(cls);
+        }
+    }
+
+    if (response) {
+        id tracklist = axs_send_id(response, @"tracklist");
+        axs_playstar_log(@"dump: tracklist=%@", tracklist ? NSStringFromClass([tracklist class]) : @"nil");
+        id item = axs_send_id(tracklist, @"playingItem");
+        axs_playstar_log(@"dump: playingItem=%@", item ? NSStringFromClass([item class]) : @"nil");
+        if (item) {
+            NSArray *names = @[@"likeCommand", @"dislikeCommand", @"bookmarkCommand",
+                               @"isFavoriteEligible", @"isFavorited", @"contentItemIdentifier"];
+            for (NSString *name in names) {
+                if (![item respondsToSelector:NSSelectorFromString(name)]) {
+                    axs_playstar_log(@"dump: item.%@ = (no selector)", name);
+                    continue;
+                }
+                id value = axs_send_id(item, name);
+                axs_playstar_log(@"dump: item.%@ = %@", name,
+                                 value ? [NSString stringWithFormat:@"%@ %@", NSStringFromClass([value class]), value] : @"nil");
+            }
+        }
+    }
+    axs_playstar_log(@"=== dump end");
 }
 
 @end
