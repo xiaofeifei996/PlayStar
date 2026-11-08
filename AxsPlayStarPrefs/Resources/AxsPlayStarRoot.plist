@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>title</key>
+	<string>播放器星标</string>
+	<key>items</key>
+	<array>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>锁屏与控制中心的播放器左侧会多出一颗星标，点一下即可收藏当前曲目。</string>
+			<key>footerText</key>
+			<string>收藏走的是 MediaPlaybackCore 私有通道——由播放器自己的收藏处理器执行，因此是真实收藏（会写进它的曲库、App 内状态同步刷新），不是只改图标。
+
+状态同步：播放器回报收藏状态的（如 Apple Music）以它为准；不回报的（如汽水音乐）由插件本地记账，锁屏与控制中心显示一致。</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>启用星标按钮</string>
+			<key>key</key>
+			<string>enabled</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.axs.playstar</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>系统已自带时跳过</string>
+			<key>key</key>
+			<string>skipNativeStar</string>
+			<key>default</key>
+			<true/>
+			<key>footerText</key>
+			<string>iOS 26 及以后的播放器自带同款星标，开启本项可避免重复。想在更高版本上强行叠加时再关闭它。</string>
+			<key>defaults</key>
+			<string>com.axs.playstar</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>行为</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>点击时震动反馈</string>
+			<key>key</key>
+			<string>hapticFeedback</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.axs.playstar</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>诊断</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>写入调试日志</string>
+			<key>key</key>
+			<string>debugLog</string>
+			<key>defaults</key>
+			<string>com.axs.playstar</string>
+			<key>default</key>
+			<false/>
+			<key>footerText</key>
+			<string>开启后记录到 /var/mobile/Documents/AxsPlayStar.log，反馈问题时附上该文件。</string>
+		</dict>
+	</array>
+</dict>
+</plist>
