@@ -1,6 +1,6 @@
 Package: com.axs.playstar
 Name: 播放器星标
-Version: 5.3.1-1
+Version: 5.3.2-1
 Architecture: iphoneos-arm
 Description: 把 iOS 26 锁屏/控制中心播放器的星标收藏按钮移植到 iOS 16，走 MediaPlaybackCore 私有通道触发播放器自己的收藏逻辑。
 Maintainer: Axs
