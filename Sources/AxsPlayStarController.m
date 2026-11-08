@@ -22,6 +22,8 @@ static const void *kAxsPlayStarButtonKey = &kAxsPlayStarButtonKey;
 @property (nonatomic, weak) UIView *lastHost;
 /// 正在派发中，避免连点重复提交。
 @property (nonatomic, assign) BOOL dispatching;
+/// 上次记录的星标位置，用于抑制重复的布局日志。
+@property (nonatomic, assign) CGRect lastLoggedStarFrame;
 @end
 
 @implementation AxsPlayStarController
@@ -273,10 +275,14 @@ static const void *kAxsPlayStarButtonKey = &kAxsPlayStarButtonKey;
     CGPoint centerInHost = CGPointMake(centerX, centerY);
     UIView *container = button.superview ?: host;
     button.center = [container convertPoint:centerInHost fromView:host];
-    axs_playstar_log(@"layout host=%@ bounds=%@ leading=%@ routing=%@ star=%@",
-                    NSStringFromClass(host.class), NSStringFromCGRect(bounds),
-                    NSStringFromCGRect(leading.frame), NSStringFromCGRect(routing.frame),
-                    NSStringFromCGRect(button.frame));
+    // 布局每次刷新都会走到这里，只在位置真的变化时记一笔，避免日志被刷爆。
+    if (!CGRectEqualToRect(self.lastLoggedStarFrame, button.frame)) {
+        self.lastLoggedStarFrame = button.frame;
+        axs_playstar_log(@"layout host=%@ bounds=%@ leading=%@ routing=%@ star=%@",
+                        NSStringFromClass(host.class), NSStringFromCGRect(bounds),
+                        NSStringFromCGRect(leading.frame), NSStringFromCGRect(routing.frame),
+                        NSStringFromCGRect(button.frame));
+    }
     [button axs_playstar_applyTintColor:[self axs_playstar_tintColorForHost:host]];
 }
 
@@ -284,7 +290,13 @@ static const void *kAxsPlayStarButtonKey = &kAxsPlayStarButtonKey;
 
 - (void)axs_playstar_handleTap:(AxsPlayStarButton *)sender {
     AxsPlayStarTrack *track = self.track;
-    if (!track || self.dispatching) return;
+    axs_playstar_log(@"tap begin track=%@ dispatching=%d", track ? track.title : @"(nil)", self.dispatching);
+    if (!track) {
+        // 拿不到曲目时不要静默 —— 这正是「看起来没反应」的根因。
+        [self axs_playstar_showToast:@"读不到当前播放信息"];
+        return;
+    }
+    if (self.dispatching) return;
 
     // 按钮挂在宿主的父视图上，所以要用记录下来的宿主做对象图溯源。
     UIView *host = nil;
