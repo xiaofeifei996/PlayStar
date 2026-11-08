@@ -243,9 +243,8 @@ static const void *kAxsPlayStarButtonKey = &kAxsPlayStarButtonKey;
     [controlsView bringSubviewToFront:button];
     [self axs_playstar_layoutInControlsView:controlsView];
     [self axs_playstar_applyState];
-    axs_playstar_log(@"install host=%@ container=%@ bounds=%@",
+    axs_playstar_log(@"install host=%@ bounds=%@",
                      NSStringFromClass(controlsView.class),
-                     NSStringFromClass(container.class),
                      NSStringFromCGRect(controlsView.bounds));
 }
 
