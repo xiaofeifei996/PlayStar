@@ -36,6 +36,13 @@ typedef NS_ENUM(NSInteger, AxsPlayStarVoteOutcome) {
 + (BOOL)axs_playstar_isLikedFor:(id _Nullable)source;
 + (BOOL)axs_playstar_isEligibleFor:(id _Nullable)source;
 
+/// 直接从 MediaPlaybackCore 的 response 读当前曲目信息。
+/// 这条路径不经过 MediaRemote 查询，因此不受 now-playing client 权限限制 ——
+/// MRMediaRemoteGetNowPlayingInfo 在 MediaRemoteUI 进程里会返回 NULL。
+/// 返回 nil 表示对象图拿不到，调用方才回退到 MediaRemote。
+/// 字段：title / artist / album / contentItemID / isLiked / isEligible
++ (NSDictionary *_Nullable)axs_playstar_nowPlayingFromSource:(id _Nullable)source;
+
 /// 诊断：把从 view 到 playingItem 的整条对象图逐层写进日志。
 /// 只在点星标失败时调用，用来定位到底断在哪一层。
 + (void)axs_playstar_dumpObjectGraphFrom:(id _Nullable)source;
