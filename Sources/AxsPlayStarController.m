@@ -24,6 +24,18 @@ static const void *kAxsPlayStarButtonKey = &kAxsPlayStarButtonKey;
 @property (nonatomic, assign) BOOL dispatching;
 /// 上次记录的星标位置，用于抑制重复的布局日志。
 @property (nonatomic, assign) CGRect lastLoggedStarFrame;
+// 内部方法前置声明，避免 -Werror 下的 no-visible-interface 报错。
+- (AxsPlayStarTrack *)axs_playstar_trackFromMPC;
+- (UIView *)axs_playstar_anyHost;
+- (void)axs_playstar_probeEligibility;
+- (void)axs_playstar_showToast:(NSString *)text;
+- (void)axs_playstar_changedLiked:(BOOL)liked forTrack:(AxsPlayStarTrack *)track;
+- (void)axs_playstar_playHaptic:(BOOL)success;
+- (NSString *)axs_playstar_messageForOutcome:(AxsPlayStarVoteOutcome)outcome;
+- (void)axs_playstar_finishTapOnTrack:(AxsPlayStarTrack *)track
+                                liked:(BOOL)liked
+                            confirmed:(BOOL)confirmed
+                               detail:(NSString *)detail;
 @end
 
 @implementation AxsPlayStarController
@@ -74,13 +86,32 @@ static const void *kAxsPlayStarButtonKey = &kAxsPlayStarButtonKey;
 #pragma mark - 曲目状态
 
 - (void)axs_playstar_requestTrack {
-    if (![AxsPlayStarRemote axs_playstar_shared].axs_playstar_available) return;
+    // 注意：不要因为 MediaRemote 符号缺失就提前返回 ——
+    // 主路径是 MPC 对象图，和 MediaRemote 完全没有关系。
     if (self.requesting) {
         self.requestAgain = YES;
         return;
     }
     self.requesting = YES;
     __weak typeof(self) weakSelf = self;
+
+    // 优先从 MediaPlaybackCore 的 response 读曲目：
+    // MRMediaRemoteGetNowPlayingInfo 在 MediaRemoteUI 进程里返回 NULL（实测），
+    // 那条路根本拿不到数据。response 是系统星标自己用的数据源，不涉及权限。
+    AxsPlayStarTrack *mcpTrack = [self axs_playstar_trackFromMPC];
+    if (mcpTrack) {
+        self.track = mcpTrack;
+        self.requesting = NO;
+        [self axs_playstar_probeEligibility];
+        [self axs_playstar_applyState];
+        if (self.requestAgain) {
+            self.requestAgain = NO;
+            [self axs_playstar_requestTrack];
+        }
+        return;
+    }
+
+    // 回退：MediaRemote 查询。只有持有 now-playing client 身份时才有效。
     [[AxsPlayStarRemote axs_playstar_shared] axs_playstar_requestTrack:^(AxsPlayStarTrack *track) {
         __strong typeof(weakSelf) self = weakSelf;
         if (!self) return;
@@ -102,12 +133,7 @@ static const void *kAxsPlayStarButtonKey = &kAxsPlayStarButtonKey;
         self.voteEligible = nil;
         return;
     }
-    UIView *host = nil;
-    for (UIView *candidate in self.hosts.allObjects) {
-        host = candidate;
-        break;
-    }
-    if (!host) host = self.lastHost;
+    UIView *host = [self axs_playstar_anyHost];
     if (!host) {
         self.voteEligible = nil;
         return;
@@ -115,6 +141,38 @@ static const void *kAxsPlayStarButtonKey = &kAxsPlayStarButtonKey;
     BOOL eligible = [AxsPlayStarMPC axs_playstar_isEligibleFor:host];
     self.voteEligible = @(eligible);
     axs_playstar_log(@"eligibility key=%@ eligible=%d", self.track.key, eligible);
+}
+
+
+/// 用 MediaPlaybackCore 的 response 拼出曲目。拿不到返回 nil。
+- (AxsPlayStarTrack *)axs_playstar_trackFromMPC {
+    UIView *host = [self axs_playstar_anyHost];
+    if (!host) return nil;
+
+    NSDictionary *info = [AxsPlayStarMPC axs_playstar_nowPlayingFromSource:host];
+    NSString *title = info[@"title"];
+    if (title.length == 0) return nil;
+
+    AxsPlayStarTrack *track = [AxsPlayStarTrack new];
+    track.title = title;
+    track.artist = info[@"artist"] ?: @"";
+    track.album = info[@"album"] ?: @"";
+    track.contentItemID = info[@"contentItemID"] ?: @"";
+    // 有 contentItemID 时它就是最准的曲目身份，重播同一首也能对上。
+    track.key = track.contentItemID.length > 0
+        ? [NSString stringWithFormat:@"ci:%@", track.contentItemID]
+        : [NSString stringWithFormat:@"ta:%@|%@", track.title, track.artist];
+    if (info[@"liked"]) track.systemLiked = [info[@"liked"] boolValue];
+    if (info[@"eligible"]) track.supportsVote = [info[@"eligible"] boolValue];
+    return track;
+}
+
+- (UIView *)axs_playstar_anyHost {
+    for (UIView *candidate in self.hosts.allObjects) {
+        if (candidate.window) return candidate;
+    }
+    for (UIView *candidate in self.hosts.allObjects) return candidate;
+    return self.lastHost;
 }
 
 - (BOOL)axs_playstar_isLiked {
@@ -166,21 +224,23 @@ static const void *kAxsPlayStarButtonKey = &kAxsPlayStarButtonKey;
     [self.hosts addObject:controlsView];
     self.lastHost = controlsView;
 
-    // 星标的 frame 落在宿主 bounds 之外，作为子视图不会被命中测试接受。
-    // 挂到父视图上，用父视图坐标系定位 —— 父视图比宿主宽，星标就落在它的 bounds 内，
-    // 命中测试天然可用，不需要改任何 pointInside。
-    UIView *container = controlsView.superview ?: controlsView;
+    // 星标必须挂在传输控件行自己身上。
+    // 之前挂到父视图（MRUNowPlayingView）上，那是个纯容器、不接收触摸，
+    // 实测日志里 tap 命中 0 次 —— 这是「点了没反应」的真正原因。
+    // 挂在宿主内部后，宿主自己的 hitTest 就会把触摸交给星标。
     AxsPlayStarButton *button = objc_getAssociatedObject(controlsView, kAxsPlayStarButtonKey);
     if (!button) {
         button = [AxsPlayStarButton axs_playstar_button];
         [button addTarget:self action:@selector(axs_playstar_handleTap:) forControlEvents:UIControlEventTouchUpInside];
         objc_setAssociatedObject(controlsView, kAxsPlayStarButtonKey, button, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        [container addSubview:button];
-    } else if (button.superview != container) {
+        [controlsView addSubview:button];
+    } else if (button.superview != controlsView) {
         [button removeFromSuperview];
-        [container addSubview:button];
+        [controlsView addSubview:button];
     }
-    [container bringSubviewToFront:button];
+    // 宿主要是把交互关掉（部分容器视图会），点击永远进不来。
+    controlsView.userInteractionEnabled = YES;
+    [controlsView bringSubviewToFront:button];
     [self axs_playstar_layoutInControlsView:controlsView];
     [self axs_playstar_applyState];
     axs_playstar_log(@"install host=%@ container=%@ bounds=%@",
@@ -271,10 +331,29 @@ static const void *kAxsPlayStarButtonKey = &kAxsPlayStarButtonKey;
         centerY = (left && !CGRectIsEmpty(left.frame)) ? CGRectGetMidY(left.frame) : CGRectGetMidY(bounds);
     }
 
+    // 星标是宿主的子视图，直接在宿主坐标系里定位。
+    // 系统的 leading/routing 槽位落在 bounds 之外（leading.x = -26），
+    // 星标摆进去就超出可视区，所以这里把它钳回宿主内部。
     button.bounds = CGRectMake(0, 0, size, size);
-    CGPoint centerInHost = CGPointMake(centerX, centerY);
-    UIView *container = button.superview ?: host;
-    button.center = [container convertPoint:centerInHost fromView:host];
+    CGFloat half = size * 0.5;
+    centerX = MIN(MAX(centerX, half), MAX(bounds.size.width - half, half));
+    if (centerY <= 0) centerY = CGRectGetMidY(bounds);
+    centerY = MIN(MAX(centerY, half), MAX(bounds.size.height - half, half));
+    button.center = CGPointMake(centerX, centerY);
+    static BOOL loggedSubviews = NO;
+    if (!loggedSubviews) {
+        loggedSubviews = YES;
+        NSMutableArray *parts = [NSMutableArray array];
+        for (UIView *sub in host.subviews) {
+            [parts addObject:[NSString stringWithFormat:@"%@%@", NSStringFromClass([sub class]),
+                              NSStringFromCGRect(sub.frame)]];
+        }
+        axs_playstar_log(@"subviews host=%@ bounds=%@ interactive=%d list=%@",
+                         NSStringFromClass([host class]), NSStringFromCGRect(host.bounds),
+                         host.userInteractionEnabled, [parts componentsJoinedByString:@" | "]);
+        axs_playstar_log(@"superview bounds=%@ frame=%@",
+                         NSStringFromCGRect(host.superview.bounds), NSStringFromCGRect(host.frame));
+    }
     // 布局每次刷新都会走到这里，只在位置真的变化时记一笔，避免日志被刷爆。
     if (!CGRectEqualToRect(self.lastLoggedStarFrame, button.frame)) {
         self.lastLoggedStarFrame = button.frame;
