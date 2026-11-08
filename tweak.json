@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "name": "PlayStar",
+  "id": "playstar",
+  "display_name": "播放器星标",
+  "class_prefix": "AxsPlayStar",
+  "symbol_prefix": "axs_playstar",
+  "package": "com.axs.playstar",
+  "bundle": "com.apple.springboard",
+  "sdk_version": "16.5",
+  "minimum_ios": "14.0",
+  "preferences": true,
+  "slider": false,
+  "github_actions": true
+}
